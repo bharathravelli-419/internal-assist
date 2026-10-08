@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-@Component
+//@Component
 public class IngestionManifest {
 
     public record Entry(String hash, List<String> chunkIds){}

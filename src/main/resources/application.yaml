@@ -1,20 +1,34 @@
 spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5433/assist
+    username: assist
+    password: assist
   ai:
+    model:
+      chat: google-genai
+      embedding: ollama
+    ollama:
+      base-url: http://localhost:11435
+      embedding:
+        options:
+          model: nomic-embed-text:latest
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        distance-type: COSINE_DISTANCE
+        dimensions: 768
+        index-type: HNSW
     google:
       genai:
-        api-key: ${GEMINI_API_KEY}
-        embedding:
-          api-key: ${GEMINI_API_KEY}
+        api-key: ${API-KEY}
         chat:
-          options:
-            model: gemini-3.5-flash
-
+          model: gemini-3.5-flash
 
 app:
-  vector-store:
-    file: data/vector-store.json
+  excel:
+    rows-per-chunk: 1
+    max-rows: 5000
 
   ingestion:
     docs-dir: data/docs
-    manifest-file: data/ingestion-manifest.json
     cron: "0 0 2 * * MON"

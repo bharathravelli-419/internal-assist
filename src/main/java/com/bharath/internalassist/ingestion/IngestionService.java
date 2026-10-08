@@ -1,14 +1,22 @@
 package com.bharath.internalassist.ingestion;
 
-import com.bharath.internalassist.config.VectorStorePersistence;
+//import com.bharath.internalassist.config.VectorStorePersistence;
+import com.bharath.internalassist.tabular.ExcelParser;
+import com.bharath.internalassist.tabular.TableData;
+import com.bharath.internalassist.tabular.TableRegistry;
+import com.bharath.internalassist.tabular.TableTextConverter;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
@@ -23,52 +31,89 @@ public class IngestionService {
 
     public record Result(String file, String status, int chunks){}
     private final VectorStore vectorStore;
-    private final VectorStorePersistence persistence;
-    private final IngestionManifest manifest;
+//    private final VectorStorePersistence persistence;
+    private final IngestionLedger ledger;
+    private final TransactionTemplate transactions;
+//    private final IngestionManifest manifest;
     private final Path docsDir;
+    private final ExcelParser excelParser;
+    private final TableRegistry tableRegistry;
+    private final int rowsPerChunk;
 
-    private static final Set<String> SUPPORTED = Set.of(".pdf", ".docx", ".doc", ".txt");
+    private static final Set<String> SUPPORTED = Set.of(".pdf", ".docx", ".doc", ".txt", "xlsx");
 
     public IngestionService(VectorStore vectorStore,
-                            VectorStorePersistence persistence,
-                            IngestionManifest manifest,
-                            @Value("${app.ingestion.docs-dir}") String docsDir){
+//                            VectorStorePersistence persistence,
+                            PlatformTransactionManager transactionManager,
+                            IngestionLedger ledger,
+//                            IngestionManifest manifest,
+                            @Value("${app.ingestion.docs-dir}") String docsDir,
+                            ExcelParser excelParser,
+                            TableRegistry tableRegistry,
+                            @Value("${app.excel.rows-per-chunk:1}") int rowsPerChunk
+    ){
         this.vectorStore = vectorStore;
-        this.persistence = persistence;
-        this.manifest = manifest;
+//        this.persistence = persistence;
+        this.ledger = ledger;
+        this.transactions = new TransactionTemplate(transactionManager);
+//        this.manifest = manifest;
         this.docsDir = Path.of(docsDir).toAbsolutePath().normalize();
+        this.excelParser = excelParser;
+        this.tableRegistry = tableRegistry;
+        this.rowsPerChunk = rowsPerChunk;
     }
 
     public synchronized Result ingest(String fileName){
         Path file = resolve(fileName);
         String hash = sha256(file);
 
-        var existing = manifest.find(fileName);
+//        var existing = manifest.find(fileName);
+        var existing = ledger.find(fileName);
         if(existing.isPresent() && existing.get().hash().equals(hash)){
-            return new Result(fileName, "unchanged", existing.get().chunkIds().size());
+            return new Result(fileName, "unchanged", existing.get().chunkCount());
         }
 
-        List<Document> chunks = readAndSplit(file, fileName);
+        List<TableData> tables = null;
+        List<Document> chunks;
+        if(ExcelParser.isExcel(fileName)){
+            tables = excelParser.parse(file, fileName);
+            chunks = TableTextConverter.toDocuments(tables, rowsPerChunk);
+        }else{
+            chunks = readAndSplit(file, fileName);
+        }
+
         if(chunks.isEmpty()){
-            return new Result(fileName, "No-text-extracted", 0);
+            return new Result(fileName, "no-text-extracted", 0);
         }
 
-        List <String> newIds  = chunks.stream().map(Document :: getId).toList();
+        int count = chunks.size();
 
-        try{
+        transactions.executeWithoutResult(status ->{
+            vectorStore.delete(sourceIs(fileName));
             vectorStore.add(chunks);
+            ledger.upsert(fileName, hash, count);
+        });
+
+//        List <String> newIds  = chunks.stream().map(Document :: getId).toList();
+//
+//        try{
+//            vectorStore.add(chunks);
+//        }
+//        catch (RuntimeException e){
+//            vectorStore.delete(newIds);
+//            throw e;
+//        }
+
+//
+//        existing.ifPresent(old -> vectorStore.delete(old.chunkIds()));
+//        persistence.save();
+//
+//        manifest.put(fileName, new IngestionManifest.Entry(hash, newIds));
+
+        if(tables != null){
+            tableRegistry.replace(fileName, tables);
         }
-        catch (RuntimeException e){
-            vectorStore.delete(newIds);
-            throw e;
-        }
-
-
-        existing.ifPresent(old -> vectorStore.delete(old.chunkIds()));
-        persistence.save();
-
-        manifest.put(fileName, new IngestionManifest.Entry(hash, newIds));
-        return new Result(fileName, existing.isPresent() ? "updated": "added", newIds.size());
+        return new Result(fileName, existing.isPresent() ? "updated": "added", count);
     }
 
     public synchronized List<Result> ingestAll(){
@@ -91,20 +136,29 @@ public class IngestionService {
     }
 
     public synchronized Result remove(String fileName){
-        Path file = resolve(fileName);
-        var existing = manifest.find(fileName);
-        if(existing.isEmpty()){
+//        var existing = manifest.find(fileName);
+        var entry = ledger.find(fileName);
+
+        if(entry.isEmpty()){
             return new Result(fileName, "not-found", 0);
         }
-        vectorStore.delete(existing.get().chunkIds());
-        persistence.save();
-        manifest.remove(fileName);
-        return new Result(fileName, "removed", existing.get().chunkIds().size());
+//        vectorStore.delete(existing.get().chunkIds());
+//        persistence.save();
+//        manifest.remove(fileName);
+        transactions.executeWithoutResult(status ->{
+            vectorStore.delete(sourceIs(fileName));
+            ledger.remove(fileName);
+        });
+        tableRegistry.remove(fileName);
+        return new Result(fileName, "removed", entry.get().chunkCount());
     }
 
     public synchronized List<Result> list(){
-        return manifest.all().entrySet().stream()
-                .map(e -> new Result(e.getKey(), "ingested", e.getValue().chunkIds().size()))
+//        return manifest.all().entrySet().stream()
+//                .map(e -> new Result(e.getKey(), "ingested", e.getValue().chunkIds().size()))
+//                .toList();
+        return ledger.all().stream()
+                .map(e -> new Result(e.fileName(), "ingested", e.chunkCount()))
                 .toList();
     }
 
@@ -113,14 +167,14 @@ public class IngestionService {
                 .map(d -> {
                     Map<String, Object> metadata = new HashMap<>(d.getMetadata());
                     metadata.put("source", fileName);
-                    return new Document(d.getId(), metadata);
+                    return new Document(d.getText(), metadata);
                 })
                 .toList();
         TokenTextSplitter splitter = TokenTextSplitter.builder().build();
         return splitter.apply(raw);
     }
 
-    private final String sha256(Path file){
+    private String sha256(Path file){
         try{
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file));
             return HexFormat.of().formatHex(digest);
@@ -144,5 +198,9 @@ public class IngestionService {
     public static boolean isSupported(String fileName){
         String lower = fileName.toLowerCase();
         return !lower.startsWith("~$") && SUPPORTED.stream().anyMatch(lower::endsWith);
+    }
+
+    private static Filter.Expression sourceIs(String fileName){
+        return new FilterExpressionBuilder().eq("source", fileName).build();
     }
 }

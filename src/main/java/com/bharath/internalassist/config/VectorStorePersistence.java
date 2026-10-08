@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.File;
 
-@Component
+//@Component
 public class VectorStorePersistence {
 
     private final VectorStore vectorStore;

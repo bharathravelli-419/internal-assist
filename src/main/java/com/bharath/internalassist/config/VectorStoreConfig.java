@@ -9,10 +9,10 @@ import org.springframework.context.annotation.Configuration;
 
 import java.io.File;
 
-@Configuration
+//@Configuration
 public class VectorStoreConfig {
 
-    @Bean
+//    @Bean
     VectorStore vectorStore(EmbeddingModel embeddingModel, @Value("${app.vector-store.file}") String filePath){
         SimpleVectorStore store = SimpleVectorStore.builder(embeddingModel).build();
 
