@@ -25,6 +25,7 @@ public class IngestionManifest {
     public IngestionManifest(ObjectMapper objectMapper, @Value("${app.ingestion.manifest-file}") String filePath){
         this.objectMapper = objectMapper;
         this.file = Path.of(filePath);
+        load();
     }
 
     public Optional<Entry> find(String fileName){
