@@ -1,0 +1,20 @@
+spring:
+  ai:
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY}
+        embedding:
+          api-key: ${GEMINI_API_KEY}
+        chat:
+          options:
+            model: gemini-3.5-flash
+
+
+app:
+  vector-store:
+    file: data/vector-store.json
+
+  ingestion:
+    docs-dir: data/docs
+    manifest-file: data/ingestion-manifest.json
+    cron: "0 0 2 * * MON"
