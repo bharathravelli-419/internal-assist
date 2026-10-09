@@ -1,5 +1,7 @@
 package com.bharath.internalassist.ingestion;
 
+import com.bharath.internalassist.tenant.ApiKeyFilter;
+import com.bharath.internalassist.tenant.Caller;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,28 +18,30 @@ public class IngestionController {
     private IngestionService ingestionService;
 
     @PostMapping
-    public IngestionService.Result ingest(@RequestParam String fileName) {
-        return ingestionService.ingest(fileName);
+    public IngestionService.Result ingest(
+            @RequestAttribute(ApiKeyFilter.CALLER_ATTRIBUTE) Caller caller,
+            @RequestParam String fileName) {
+        return ingestionService.ingest(caller.tenantId(), fileName);
     }
 
     @PostMapping("/all")
-    public List<IngestionService.Result> ingestAll() {
-        return ingestionService.ingestAll();
+    public List<IngestionService.Result> ingestAll( @RequestAttribute(ApiKeyFilter.CALLER_ATTRIBUTE) Caller caller) {
+        return ingestionService.ingestAll(caller.tenantId());
     }
 
     @GetMapping
-    public List<IngestionService.Result> list() {
-        return ingestionService.list();
+    public List<IngestionService.Result> list( @RequestAttribute(ApiKeyFilter.CALLER_ATTRIBUTE) Caller caller) {
+        return ingestionService.list(caller.tenantId());
     }
 
     @DeleteMapping
-    public IngestionService.Result remove(@RequestParam String fileName){
-        return ingestionService.remove(fileName);
+    public IngestionService.Result remove(@RequestParam String fileName,@RequestAttribute(ApiKeyFilter.CALLER_ATTRIBUTE) Caller caller ){
+        return ingestionService.remove(caller.tenantId(), fileName);
     }
 
     @PostMapping("/url")
-    public IngestionService.Result ingestUrl(@RequestParam String url){
-        return ingestionService.ingestUrl(url);
+    public IngestionService.Result ingestUrl( @RequestAttribute(ApiKeyFilter.CALLER_ATTRIBUTE) Caller caller,@RequestParam String url){
+        return ingestionService.ingestUrl(caller.tenantId(),url);
     }
 
 }

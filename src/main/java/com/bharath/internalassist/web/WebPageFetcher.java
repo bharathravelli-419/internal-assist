@@ -20,17 +20,12 @@ public class WebPageFetcher {
 
     public record Page(String url, String title, String text){}
 
-    private final Set<String> allowedHosts;
-
-    public WebPageFetcher(@Value("${app.web.allowed-hosts}") List<String> allowedHosts){
-        this.allowedHosts = allowedHosts.stream()
-                .map(h-> h.trim().toLowerCase(Locale.ROOT))
-                .filter(h-> !h.isEmpty())
-                .collect(Collectors.toSet());
-    }
-
-    public Page fetch(String url){
-        requireAllowed(url);
+    public Page fetch(String url, List<String> allowedHosts){
+        Set<String> allowed = allowedHosts.stream()
+                        .map(h-> h.trim().toLowerCase(Locale.ROOT))
+                                .filter(h-> !h.isEmpty())
+                                        .collect(Collectors.toSet());
+        requireAllowed(url, allowed);
         try {
             Document doc = Jsoup.connect(url)
                     .userAgent("internal-assist/0.1 (internal research tool)")
@@ -38,7 +33,7 @@ public class WebPageFetcher {
                     .maxBodySize(2_000_000)
                     .get();
 
-            requireAllowed(doc.location());
+            requireAllowed(doc.location(), allowed);
 
             doc.select("script, style, noscript, nav, header, footer, aside, form, iframe").remove();
             Element main = doc.selectFirst("main");
@@ -48,7 +43,7 @@ public class WebPageFetcher {
             throw new IllegalStateException("Could not download "+ url +": "+ e.getMessage());
         }
     }
-    private void requireAllowed(String url){
+    private void requireAllowed(String url, Set<String> allowedHosts){
         String host;
         try{
             host = URI.create(url).getHost();

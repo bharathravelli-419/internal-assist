@@ -26,9 +26,10 @@ public class TableTools {
     + "Call this when you are not sure which table or column to use.",
             name = "listTablesTool"
     )
-    public String listTables(){
-        log.info("TOOL listTables");
-        return registry.dictionary();
+    public String listTables(ToolContext toolContext){
+        String tenant = tenantOf(toolContext);
+        log.info("TOOL listTables tenant {}", tenant);
+        return registry.dictionary(tenant);
     }
 
     @Tool(description = "Find rows in a data table where one column exactly equals a value. "
@@ -42,10 +43,11 @@ public class TableTools {
             @ToolParam(description = "The exact value to match, for example Diwali Quiz 2025", required = false) String value,
             ToolContext toolContext
     ){
-        log.info("TOOL lookupRows table={} column={} value={}", table, column, value);
-        var found = registry.find(table == null ? "" : table);
+        String tenant = tenantOf(toolContext);
+        log.info("TOOL lookupRows tenant={} table={} column={} value={}", tenant, table, column, value);
+        var found = registry.find(tenant,table == null ? "" : table);
         if(found.isEmpty()){
-            return "Unknown table "+ table+ ". Available tables:\n"+ registry.dictionary();
+            return "Unknown table "+ table+ ". Available tables:\n"+ registry.dictionary(tenant);
         }
         TableData data = found.get();
         try{
@@ -66,6 +68,13 @@ public class TableTools {
         }
     }
 
+    private static String tenantOf(ToolContext toolContext){
+        Object tenant = toolContext.getContext().get(ChatService.TENANT_KEY);
+        if(tenant == null){
+            throw new IllegalStateException("no tenant in the tool context");
+        }
+        return tenant.toString();
+    }
     //Chat service puts empty list in toolsCtx before every question
     @SuppressWarnings("unchecked")
     private static void recordEvidence(ToolContext toolContext,String tableId, int rows){

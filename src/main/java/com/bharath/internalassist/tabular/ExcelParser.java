@@ -12,7 +12,7 @@ import java.util.*;
 @Component
 public class ExcelParser {
 
-    private int maxRows;
+    private final int maxRows;
 
     public ExcelParser(@Value("${app.excel.max-rows:5000}") int maxRows){
         this.maxRows = maxRows;

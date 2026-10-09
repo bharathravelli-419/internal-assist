@@ -25,7 +25,7 @@ spring:
         index-type: HNSW
     openai:
       base-url: https://api.groq.com/openai/v1
-      api-key: {APIKEY}
+      api-key: ${API_KEYY}
       chat:
         options:
           model: openai/gpt-oss-20b
@@ -33,7 +33,7 @@ spring:
 
     google:
       genai:
-        api-key: {API-KEY}
+        api-key: {API-KEY5}
         chat:
           model: gemini-3.5-flash
 
@@ -47,12 +47,29 @@ app:
 
   rag:
     top-k: 4
-    min-score: 0.55
+    min-score: 0.51
     suggest-min-score: 0.40
   excel:
     rows-per-chunk: 1
     max-rows: 5000
 
   ingestion:
-    docs-dir: data/docs
+    base-dir: data/tenant
     cron: "0 0 2 * * MON"
+
+  tenants:
+    - id: edward-jones
+      name: Edward Jones
+      description: "financial services client - focuses on wealth management products"
+      user-key: {API-KEY}
+      admin-key: {API-KEY1}
+      web-pages: ["https://www.edwardjones.com/us-en/market-news-insights/guidance-perspective/ai-investing-ejp", "https://www.edwardjones.com/us-en/why-edward-jones/news-media/press-releases/edward-jones-ventures-invests-ai-driven-solutions-help-families-navigate-lifes-biggest-financial"]
+      allowed-hosts: ["www.edwardjones.com"]
+
+    - id: walmart-tech
+      name: Walmart Global Tech
+      description: "Walmart Global Tech. - Marketing and E Commerce"
+      admin-key: {API-KEY2}
+      user-key: {API-KEY3}
+      web-pages: ["https://www.tech.walmart.com/content/walmart-global-tech/en_us.html","https://www.walmartconnect.com/partners"]
+      allowed-hosts: ["www.walmartconnect.com","www.tech.walmart.com"]

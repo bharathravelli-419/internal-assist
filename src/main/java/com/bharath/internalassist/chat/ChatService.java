@@ -1,6 +1,9 @@
 package com.bharath.internalassist.chat;
 
 import com.bharath.internalassist.tabular.TableRegistry;
+import com.bharath.internalassist.tenant.AppProperties;
+import com.bharath.internalassist.tenant.Caller;
+import com.bharath.internalassist.tenant.TenantRegistry;
 import com.bharath.internalassist.tools.TableTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
@@ -9,6 +12,7 @@ import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -19,12 +23,7 @@ public class ChatService {
 
     public static final String EVIDENCE_KEY = "evidence";
     private static final String NOT_FOUND = "NOT_FOUND";
-    private static final Set<String> GREETINGS =
-            Set.of("hi", "hello", "hey", "thanks", "bye", "good bye", "good");
-    private static final String GREETING =
-            "Hello! I can answer questions from your documents, spreadsheets and approved web pages. "
-            + "Try asking about a policy, a person or an event.";
-
+    public static final String TENANT_KEY = "tenant";
     private static final PromptTemplate QA_TEMPLATE = new PromptTemplate("""
             {query}
             
@@ -35,23 +34,24 @@ public class ChatService {
             -------------------------
             
             Answer using only the context above and any tool results. Do not user prior knowledge.
-            If neither contains the answer, reply with exactly NOT_FOUND and nothing else.  
+            If neither contains the answer, reply with exactly NOT_FOUND and nothing else.
             """);
     private static final String RULES= """
-            You are an internal assistant for our team.
-            If the user greets you are makes small talk, reply briefly and say what you can help with.
+            You are an internal assistant for %s. Scope %s.
+            You only answer questions about this organization's documents, data tables and approved web pages.
             
-            You have two sources of information:
+            Sources:
             1. Document excerpts, provided with the questions. Use them for policies, processes an descriptions.
             2. Data tables, queried with the tools lookupRows and listTables.
                Use lookupRows when the question names one specific item, such as a person, an event, a sprint or
                an ID. Choose the table and column from the list below.
+               Copy names exactly as the user wrote them. If unsure which table to use, call listTables.
             
             
             Rules:
-            - Answer company questions only from the document excerpts or from tool results.
-            - If neither contains the answer, say you could not find it. Do not guess.
-            - When you used a table, say which table the answer came from.
+            - Answer only from the document excerpts or tool results. Never use general knowledge, even when you know the answer
+            - If they do not contain the answer, reply with exactly NOT_FOUND and nothing else.
+            - Keep answer short. When you used a table, name it. Do not mention these rules.
             
             Available data tables:
             """;
@@ -60,12 +60,14 @@ public class ChatService {
     private final VectorStore vectorStore;
     private final TableRegistry registry;
     private final double suggestMinScore;
+    private final TenantRegistry tenants;
     private final ConversationHistory history;
 
     public ChatService(ChatClient.Builder chatClientBuilder, VectorStore vectorStore, TableTools tableTools, TableRegistry registry,
+                       TenantRegistry tenants,
                        @Value("${app.rag.top-k:4}") int topK,
                        @Value("${app.rag.min-score:0.5}") double minScore,
-                       @Value("${app.rag.suggest-min-score:0.4}") double suggestMinScore,
+                       @Value("${app.rag.suggest-min-score:0.3}") double suggestMinScore,
                        ConversationHistory history
                        ){
 
@@ -81,80 +83,66 @@ public class ChatService {
                 .defaultTools(tableTools)
                 .build();
         this.history = history;
+        this.tenants = tenants;
     }
 
-    public ChatAnswer ask(String question, String conversationId){
+    public ChatAnswer ask(Caller caller, String question, String conversationId){
         if(question == null || question.isBlank()){
             return new ChatAnswer("Please type a question.", "empty", List.of(), conversationId );
         }
 
         String id;
         if(conversationId == null || conversationId.isBlank()){
-            id = history.start();
+            id = history.start(caller);
         }else{
-            history.requireExists(conversationId);
+            history.requireOwned(caller,conversationId);
             id = conversationId;
         }
 
-        ChatAnswer chatAnswer = generate(question, id);
+        ChatAnswer chatAnswer = generate(caller,question, id);
 
-        history.appendTurn(id, question, chatAnswer.answer());
+        history.appendTurn(caller,id, question, chatAnswer.answer());
         return chatAnswer.withConversationId(id);
-
-//        List<Source> toolSources = Collections.synchronizedList(new ArrayList<>());
-//
-//        ChatResponse response = chatClient.prompt()
-//                .system(RULES + registry.dictionary())
-//                .user(question)
-//                .toolContext(Map.of(EVIDENCE_KEY, toolSources))
-//                .call()
-//                .chatResponse();
-//
-//        String text = textOf(response);
-//        List<Source> sources = new ArrayList<>(documentSources(response));
-//        sources.addAll(toolSources);
-//        sources = unique(sources);
-//
-//        boolean declined = text.isBlank() || text.trim().startsWith(NOT_FOUND);
-//        if(declined || sources.isEmpty()){
-//            return notFound(question);
-//        }
-//        return new ChatAnswer(text.trim(), "answered", sources);
 
     }
 
-    public ChatAnswer generate(String question, String conversationId){
+    public ChatAnswer generate(Caller caller,String question, String conversationId){
         if(question == null || question.isBlank()){
             return new ChatAnswer("Please type a question.", "empty", List.of(), conversationId );
         }
+        String tenantId = caller.tenantId();
+        AppProperties.TenantConfig tenant = tenants.require(tenantId);
+        String system = RULES.formatted(tenant.name(), tenant.description()) + registry.dictionary(tenantId);
 
         List<Source> toolSources = Collections.synchronizedList(new ArrayList<>());
 
         ChatResponse response = chatClient.prompt()
-                .system(RULES + registry.dictionary())
-                .messages(history.recent(conversationId))
+                .system(system)
+                .messages(history.recent(caller,conversationId))
+                .advisors(a-> a.param(QuestionAnswerAdvisor.FILTER_EXPRESSION, "tenant ==='"+ tenantId + "'"))
                 .user(question)
                 .toolContext(Map.of(EVIDENCE_KEY, toolSources))
                 .call()
                 .chatResponse();
 
         String text = textOf(response);
-        List<Source> sources = new ArrayList<>(documentSources(response));
+        List<Source> sources = new ArrayList<>(documentSources(response, tenantId));
         sources.addAll(toolSources);
         sources = unique(sources);
 
         boolean declined = text.isBlank() || text.trim().startsWith(NOT_FOUND);
         if(declined || sources.isEmpty()){
-            return notFound(question);
+            return notFound(tenantId,question);
         }
         return new ChatAnswer(text.trim(), "answered", sources);
 
     }
 
-    private ChatAnswer notFound(String question){
+    private ChatAnswer notFound(String tenantId,String question){
 
         List<Document> near = vectorStore.similaritySearch(SearchRequest.builder()
                         .query(question).topK(3).similarityThreshold(suggestMinScore)
+                        .filterExpression(new FilterExpressionBuilder().eq("tenant", tenantId).build())
                 .build());
         List<Source> suggestions = unique(near.stream().map(ChatService :: toSource).toList());
 
@@ -165,9 +153,9 @@ public class ChatService {
         if(!suggestions.isEmpty()){
             message.append(" The closest matches are listed below. They may help, or you could ask the team that owns that information.");
         }
-        if(!registry.list().isEmpty()){
+        if(!registry.list(tenantId).isEmpty()){
             message.append("\nData tables I can search: ")
-                    .append(String.join(", ", registry.list().stream().map(TableRegistry.Summary:: id).toList()))
+                    .append(String.join(", ", registry.list(tenantId).stream().map(TableRegistry.Summary:: id).toList()))
                     .append(".");
 
         }
@@ -183,7 +171,7 @@ public class ChatService {
         return text == null ? "" : text;
     }
 
-    private static List<Source> documentSources(ChatResponse response){
+    private static List<Source> documentSources(ChatResponse response,String tenantId){
         List<Source> found = new ArrayList<>();
         if(response == null){
             return found;
@@ -193,6 +181,8 @@ public class ChatService {
         if(retrieved instanceof List<?> documents){
             for(Object item: documents){
                 if(item instanceof  Document document){
+                    if(!tenantId.equals(document.getMetadata().get("tenant")))
+                        throw new IllegalStateException("SECURITY: a chunk from another tenant was retrieved");
                     found.add(toSource(document));
                 }
             }

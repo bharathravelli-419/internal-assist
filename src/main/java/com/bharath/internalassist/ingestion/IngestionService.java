@@ -4,6 +4,8 @@ import com.bharath.internalassist.tabular.ExcelParser;
 import com.bharath.internalassist.tabular.TableData;
 import com.bharath.internalassist.tabular.TableRegistry;
 import com.bharath.internalassist.tabular.TableTextConverter;
+import com.bharath.internalassist.tenant.TenantPaths;
+import com.bharath.internalassist.tenant.TenantRegistry;
 import com.bharath.internalassist.web.WebPageFetcher;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
@@ -35,42 +37,46 @@ public class IngestionService {
     private final VectorStore vectorStore;
     private final IngestionLedger ledger;
     private final TransactionTemplate transactions;
-    private final Path docsDir;
+//    private final Path docsDir;
     private final ExcelParser excelParser;
     private final TableRegistry tableRegistry;
     private final int rowsPerChunk;
     private final WebPageFetcher webPageFetcher;
-    private final List<String> webPages;
+//    private final List<String> webPages;
+    private final TenantPaths paths;
+    private final TenantRegistry tenants;
 
     private static final Set<String> SUPPORTED = Set.of(".pdf", ".docx", ".doc", ".txt", "xlsx");
 
     public IngestionService(VectorStore vectorStore,
                             PlatformTransactionManager transactionManager,
                             IngestionLedger ledger,
-                            @Value("${app.ingestion.docs-dir}") String docsDir,
+//                            @Value("${app.ingestion.docs-dir}") String docsDir,
                             ExcelParser excelParser,
                             TableRegistry tableRegistry,
                             @Value("${app.excel.rows-per-chunk:1}") int rowsPerChunk,
-                            @Value("${app.web.pages}") List<String> webPages,
-                            WebPageFetcher webPageFetcher
+//                            @Value("${app.web.pages}") List<String> webPages,
+                            WebPageFetcher webPageFetcher,
+                            TenantRegistry tenants,
+                            TenantPaths paths
 
     ){
         this.vectorStore = vectorStore;
         this.ledger = ledger;
         this.transactions = new TransactionTemplate(transactionManager);
-        this.docsDir = Path.of(docsDir).toAbsolutePath().normalize();
         this.excelParser = excelParser;
         this.tableRegistry = tableRegistry;
         this.rowsPerChunk = rowsPerChunk;
         this.webPageFetcher = webPageFetcher;
-        this.webPages = webPages;
+        this.paths = paths;
+        this.tenants = tenants;
     }
 
-    public synchronized Result ingest(String fileName){
-        Path file = resolve(fileName);
+    public synchronized Result ingest(String tenantId, String fileName){
+        Path file = resolve(tenantId, fileName);
         String hash = sha256(file);
 
-        var existing = ledger.find(fileName);
+        var existing = ledger.find(tenantId,fileName);
         if(existing.isPresent() && existing.get().hash().equals(hash)){
             return new Result(fileName, "unchanged", existing.get().chunkCount());
         }
@@ -87,15 +93,16 @@ public class IngestionService {
         if(chunks.isEmpty()){
             return new Result(fileName, "no-text-extracted", 0);
         }
-        return store(fileName, hash, chunks, tables, existing.isPresent());
+        return store(tenantId, fileName, hash, chunks, tables, existing.isPresent());
     }
 
-    public synchronized Result ingestUrl(String url){
-        WebPageFetcher.Page page = webPageFetcher.fetch(url);
+    public synchronized Result ingestUrl(String tenantId, String url){
+        var tenant = tenants.require(tenantId);
+        WebPageFetcher.Page page = webPageFetcher.fetch(url, tenant.allowedHosts());
 
         String hash = sha256Text(page.text());
 
-        var existing = ledger.find(url);
+        var existing = ledger.find(tenantId,url);
         if(existing.isPresent() && existing.get().hash().equals(hash))
             return new Result(url, "unchanged", existing.get().chunkCount());
 
@@ -105,48 +112,58 @@ public class IngestionService {
         metadata.put("title", page.title());
         List<Document> chunks = TokenTextSplitter.builder().build().apply(List.of(new Document(page.text(), metadata)));
 
-        return store(url, hash, chunks, null, existing.isPresent());
+        return store(tenantId,url, hash, chunks, null, existing.isPresent());
 
     }
 
-    private Result store(String name, String hash, List<Document> chunks, List<TableData> tables, boolean existed){
+    private Result store(String tenantId, String name, String hash, List<Document> chunks, List<TableData> tables, boolean existed){
         if(chunks.isEmpty())
             return new Result(name, "no-text-extracted",0);
-        int count = chunks.size();
+
+        List<Document> stamped = chunks.stream().map(chunk ->{
+            Map<String, Object> metaData = new HashMap<>(chunk.getMetadata());
+            metaData.put("tenant", tenantId);
+            return new Document(chunk.getId(), chunk.getText(), metaData);
+        }).toList();
+        int count = stamped.size();
+
         transactions.executeWithoutResult(status ->{
-            vectorStore.delete(sourceIs(name));
+            vectorStore.delete(sourceIs(tenantId,name));
             vectorStore.add(chunks);
-            ledger.upsert(name, hash, count);
+            ledger.upsert(tenantId,name, hash, count);
         });
 
         if(tables != null){
-            tableRegistry.replace(name, tables);
+            tableRegistry.replace(tenantId, name, tables);
         }
 
         return new Result(name, existed? "update": "added", count);
     }
 
-    public synchronized List<Result> ingestAll(){
+    public synchronized List<Result> ingestAll(String tenantId){
         List<Result> results = new ArrayList<>();
-        try(Stream<Path> files = Files.list(docsDir)) {
-            files.filter(Files :: isRegularFile)
-                    .map(p -> p.getFileName().toString())
-                    .filter(IngestionService :: isSupported)
-                    .forEach(name -> {
-                        try{
-                            results.add(ingest(name));
-                        } catch (RuntimeException e){
-                            results.add(new Result(name , "failed: "+ e.getMessage(),0));
-                        }
-                    });
-        }catch (IOException e){
-            throw new IllegalStateException(e);
+        Path dir = paths.docsDir(tenantId);
+        if(Files.isDirectory(dir)){
+            try(Stream<Path> files = Files.list(dir)) {
+                files.filter(Files :: isRegularFile)
+                        .map(p -> p.getFileName().toString())
+                        .filter(IngestionService :: isSupported)
+                        .forEach(name -> {
+                            try{
+                                results.add(ingest(tenantId,name));
+                            } catch (RuntimeException e){
+                                results.add(new Result(name , "failed: "+ e.getMessage(),0));
+                            }
+                        });
+            }catch (IOException e){
+                throw new IllegalStateException(e);
+            }
         }
-        for(String page: webPages){
+        for(String page: tenants.require(tenantId).webPages()){
             String url = page.trim();
             if(url.isEmpty()) continue;
             try{
-                results.add(ingestUrl(url));
+                results.add(ingestUrl(tenantId,url));
             }catch (RuntimeException e){
                 results.add(new Result(url, "failed: "+ e.getMessage(),0));
             }
@@ -154,22 +171,22 @@ public class IngestionService {
         return results;
     }
 
-    public synchronized Result remove(String fileName){
-        var entry = ledger.find(fileName);
+    public synchronized Result remove(String tenantId,String fileName){
+        var entry = ledger.find(tenantId,fileName);
 
         if(entry.isEmpty()){
             return new Result(fileName, "not-found", 0);
         }
         transactions.executeWithoutResult(status ->{
-            vectorStore.delete(sourceIs(fileName));
-            ledger.remove(fileName);
+            vectorStore.delete(sourceIs(tenantId, fileName));
+            ledger.remove(tenantId,fileName);
         });
-        tableRegistry.remove(fileName);
+        tableRegistry.remove(tenantId,fileName);
         return new Result(fileName, "removed", entry.get().chunkCount());
     }
 
-    public synchronized List<Result> list(){
-        return ledger.all().stream()
+    public synchronized List<Result> list(String tenantId){
+        return ledger.all(tenantId).stream()
                 .map(e -> new Result(e.fileName(), "ingested", e.chunkCount()))
                 .toList();
     }
@@ -196,9 +213,10 @@ public class IngestionService {
         }
     }
 
-    public Path resolve(String fileName){
-        Path file = docsDir.resolve(fileName).normalize();
-        if(!file.startsWith(docsDir)|| !isSupported(fileName)){
+    public Path resolve(String tenantId, String fileName){
+        Path dir = paths.docsDir(tenantId);
+        Path file = dir.resolve(fileName).normalize();
+        if(!file.startsWith(dir)|| !isSupported(fileName)){
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only .pdf, .docx, .doc and .txt files inside data/docs are allowed.");
         }
 
@@ -224,7 +242,8 @@ public class IngestionService {
         }
     }
 
-    private static Filter.Expression sourceIs(String fileName){
-        return new FilterExpressionBuilder().eq("source", fileName).build();
+    private static Filter.Expression sourceIs(String tenantId,String fileName){
+        FilterExpressionBuilder filterExpressionBuilder = new FilterExpressionBuilder();
+        return filterExpressionBuilder.and(filterExpressionBuilder.eq("tenant", tenantId), filterExpressionBuilder.eq("source", fileName)).build();
     }
 }
