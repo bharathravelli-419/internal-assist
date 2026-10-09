@@ -1,9 +1,12 @@
 package com.bharath.internalassist.tools;
 
+import com.bharath.internalassist.chat.ChatService;
+import com.bharath.internalassist.chat.Source;
 import com.bharath.internalassist.tabular.TableData;
 import com.bharath.internalassist.tabular.TableRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
@@ -36,7 +39,8 @@ public class TableTools {
     public String lookupRows(
             @ToolParam(description = "Table id exactly as listed, for example team-events.TeamEvents") String table,
             @ToolParam(description = "Column to filter on, for example EventName", required = false) String column,
-            @ToolParam(description = "The exact value to match, for example Diwali Quiz 2025", required = false) String value
+            @ToolParam(description = "The exact value to match, for example Diwali Quiz 2025", required = false) String value,
+            ToolContext toolContext
     ){
         log.info("TOOL lookupRows table={} column={} value={}", table, column, value);
         var found = registry.find(table == null ? "" : table);
@@ -47,6 +51,7 @@ public class TableTools {
         try{
             List<Map<String, String>> rows = data.where(column, value,20);
             if(!rows.isEmpty()){
+                recordEvidence(toolContext, data.id(), rows.size());
                 return rows.size()+ " rows(s) from"+ data.id()+":\n" + format(rows);
             }
             StringBuilder reply = new StringBuilder("No rows in "+ data.id()+" where "+ column + " = "+ value+ ". Values must match exactly.");
@@ -61,6 +66,15 @@ public class TableTools {
         }
     }
 
+    //Chat service puts empty list in toolsCtx before every question
+    @SuppressWarnings("unchecked")
+    private static void recordEvidence(ToolContext toolContext,String tableId, int rows){
+        Object list = toolContext.getContext().get(ChatService.EVIDENCE_KEY);
+        if(list instanceof List<?>){
+            ((List<Source>) list).add(new Source("table", tableId, "Exact lookup, "+ rows+ " row(s)"));
+        }
+    }
+
     private static String format(List<Map<String ,String>> rows){
         return rows.stream()
                 .map(row->"- "+ row.entrySet().stream()
@@ -69,6 +83,7 @@ public class TableTools {
                         .collect(Collectors.joining("; "))
                 ).collect(Collectors.joining("\n"));
     }
+
 
 
 }

@@ -4,8 +4,13 @@ spring:
     username: assist
     password: assist
   ai:
+    chat:
+      memory:
+        repository:
+          jdbc:
+            initialize-schema: always
     model:
-      chat: google-genai
+      chat: openai
       embedding: ollama
     ollama:
       base-url: http://localhost:11435
@@ -18,13 +23,32 @@ spring:
         distance-type: COSINE_DISTANCE
         dimensions: 768
         index-type: HNSW
+    openai:
+      base-url: https://api.groq.com/openai/v1
+      api-key: {APIKEY}
+      chat:
+        options:
+          model: openai/gpt-oss-20b
+
+
     google:
       genai:
-        api-key: ${API-KEY}
+        api-key: {API-KEY}
         chat:
           model: gemini-3.5-flash
 
 app:
+  chat:
+    history-message: 15
+  web:
+    # MATCHED: Both use https://
+    pages: "https://www.edwardjones.com/us-en/market-news-insights/guidance-perspective/ai-investing-ejp, https://www.edwardjones.com/us-en/why-edward-jones/news-media/press-releases/edward-jones-ventures-invests-ai-driven-solutions-help-families-navigate-lifes-biggest-financial"
+    allowed-hosts: "www.edwardjones.com"
+
+  rag:
+    top-k: 4
+    min-score: 0.55
+    suggest-min-score: 0.40
   excel:
     rows-per-chunk: 1
     max-rows: 5000

@@ -35,4 +35,9 @@ public class IngestionController {
         return ingestionService.remove(fileName);
     }
 
+    @PostMapping("/url")
+    public IngestionService.Result ingestUrl(@RequestParam String url){
+        return ingestionService.ingestUrl(url);
+    }
+
 }
