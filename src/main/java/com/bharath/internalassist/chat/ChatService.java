@@ -119,9 +119,9 @@ public class ChatService {
         ChatResponse response = chatClient.prompt()
                 .system(system)
                 .messages(history.recent(caller,conversationId))
-                .advisors(a-> a.param(QuestionAnswerAdvisor.FILTER_EXPRESSION, "tenant ==='"+ tenantId + "'"))
+                .advisors(a-> a.param(QuestionAnswerAdvisor.FILTER_EXPRESSION, "tenant == '"+ tenantId + "'"))
                 .user(question)
-                .toolContext(Map.of(EVIDENCE_KEY, toolSources))
+                .toolContext(Map.of(EVIDENCE_KEY, toolSources, TENANT_KEY, tenantId))
                 .call()
                 .chatResponse();
 

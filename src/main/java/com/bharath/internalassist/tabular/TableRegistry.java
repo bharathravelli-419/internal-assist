@@ -40,7 +40,7 @@ public class TableRegistry {
     public void loadAll(){
         for(var tenant: tenants.all()){
             Path dir = paths.docsDir(tenant.id());
-            if(!Files.isDirectory(dir))return;
+            if(!Files.isDirectory(dir)) continue;
             try(Stream<Path> files = Files.list(dir)){
                 files.filter(Files :: isRegularFile).forEach(path -> {
                     String name = path.getFileName().toString();

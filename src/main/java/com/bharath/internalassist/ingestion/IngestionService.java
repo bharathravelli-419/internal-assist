@@ -46,7 +46,7 @@ public class IngestionService {
     private final TenantPaths paths;
     private final TenantRegistry tenants;
 
-    private static final Set<String> SUPPORTED = Set.of(".pdf", ".docx", ".doc", ".txt", "xlsx");
+    private static final Set<String> SUPPORTED = Set.of(".pdf", ".docx", ".doc", ".txt", ".xlsx");
 
     public IngestionService(VectorStore vectorStore,
                             PlatformTransactionManager transactionManager,
@@ -129,7 +129,7 @@ public class IngestionService {
 
         transactions.executeWithoutResult(status ->{
             vectorStore.delete(sourceIs(tenantId,name));
-            vectorStore.add(chunks);
+            vectorStore.add(stamped);
             ledger.upsert(tenantId,name, hash, count);
         });
 
@@ -137,7 +137,7 @@ public class IngestionService {
             tableRegistry.replace(tenantId, name, tables);
         }
 
-        return new Result(name, existed? "update": "added", count);
+        return new Result(name, existed? "updated": "added", count);
     }
 
     public synchronized List<Result> ingestAll(String tenantId){
@@ -158,6 +158,8 @@ public class IngestionService {
             }catch (IOException e){
                 throw new IllegalStateException(e);
             }
+        }else{
+            results.add(new Result(dir.toString(), "failed: tenant folder not found", 0));
         }
         for(String page: tenants.require(tenantId).webPages()){
             String url = page.trim();
