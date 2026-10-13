@@ -53,12 +53,13 @@ public class TableTools {
         try{
             List<Map<String, String>> rows = data.where(column, value,20);
             if(!rows.isEmpty()){
-                recordEvidence(toolContext, data.id(), rows.size());
+                recordEvidence(toolContext, data.id(), rows.size(), "Exact Lookup");
                 return rows.size()+ " rows(s) from"+ data.id()+":\n" + format(rows);
             }
             StringBuilder reply = new StringBuilder("No rows in "+ data.id()+" where "+ column + " = "+ value+ ". Values must match exactly.");
             List<Map<String, String>> close = data.containing(column, value, 5);
             if(!close.isEmpty()){
+                recordEvidence(toolContext, data.id(), close.size(), "Partial match");
                 reply.append("\n Close matches ( the call contains your text):\n").append(format(close));
             }
             return reply.toString();
@@ -77,10 +78,10 @@ public class TableTools {
     }
     //Chat service puts empty list in toolsCtx before every question
     @SuppressWarnings("unchecked")
-    private static void recordEvidence(ToolContext toolContext,String tableId, int rows){
+    private static void recordEvidence(ToolContext toolContext,String tableId, int rows, String kind){
         Object list = toolContext.getContext().get(ChatService.EVIDENCE_KEY);
         if(list instanceof List<?>){
-            ((List<Source>) list).add(new Source("table", tableId, "Exact lookup, "+ rows+ " row(s)"));
+            ((List<Source>) list).add(new Source("table", tableId,kind+", "+ rows+ " row(s)"));
         }
     }
 

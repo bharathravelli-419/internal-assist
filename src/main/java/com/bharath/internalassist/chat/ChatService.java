@@ -10,6 +10,7 @@ import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvi
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
@@ -76,6 +77,10 @@ public class ChatService {
         this.suggestMinScore = suggestMinScore;
         SearchRequest search = SearchRequest.builder().topK(topK).similarityThreshold(minScore).build();
         this.chatClient = chatClientBuilder
+                .defaultOptions(OpenAiChatOptions.builder()
+                        .extraBody(Map.of("include_reasoning", false
+                        ))
+                )
                 .defaultAdvisors(QuestionAnswerAdvisor.builder(vectorStore)
                         .searchRequest(search)
                         .promptTemplate(QA_TEMPLATE)

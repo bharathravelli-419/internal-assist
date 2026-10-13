@@ -25,15 +25,15 @@ spring:
         index-type: HNSW
     openai:
       base-url: https://api.groq.com/openai/v1
-      api-key: DUMMY-API-Key-123456
+      api-key: GROQ_EKY
       chat:
         options:
-          model: openai/gpt-oss-20b
+          model: openai/gpt-oss-120b
 
 
     google:
       genai:
-        api-key: {API-KEY5}
+        api-key: GEMINI_KEY
         chat:
           model: gemini-3.5-flash
 
@@ -47,8 +47,8 @@ app:
 
   rag:
     top-k: 4
-    min-score: 0.51
-    suggest-min-score: 0.40
+    min-score: 0.55
+    suggest-min-score: 0.35
   excel:
     rows-per-chunk: 1
     max-rows: 5000
@@ -61,15 +61,15 @@ app:
     - id: edward-jones
       name: Edward Jones
       description: "financial services client - focuses on wealth management products"
-      user-key: {APIKEY}
+      user-key: EJ-API-KEY
       admin-key: DUMMY12345678
-      web-pages: ["https://www.edwardjones.com/us-en/market-news-insights/guidance-perspective/ai-investing-ejp", "https://www.edwardjones.com/us-en/why-edward-jones/news-media/press-releases/edward-jones-ventures-invests-ai-driven-solutions-help-families-navigate-lifes-biggest-financial"]
+      web-pages: ["https://www.edwardjones.com/us-en/market-news-insights/guidance-perspective/ai-investing-ejp", "https://www.edwardjones.com/us-en/why-edward-jones/news-media/press-releases/edward-jones-ventures-invests-ai-driven-solutions-help-families-navigate-lifes-biggest-financial", "https://www.edwardjones.com/us-en/investment-services/accounts-overview/unified-managed-account-models"]
       allowed-hosts: ["www.edwardjones.com"]
 
     - id: walmart-tech
       name: Walmart Global Tech
       description: "Walmart Global Tech. - Marketing and E Commerce"
       admin-key: DUMMY123458
-      user-key: DUMMY1244444444
+      user-key: WM_API_KEY
       web-pages: ["https://www.tech.walmart.com/content/walmart-global-tech/en_us.html","https://www.walmartconnect.com/partners"]
       allowed-hosts: ["www.walmartconnect.com","www.tech.walmart.com"]
